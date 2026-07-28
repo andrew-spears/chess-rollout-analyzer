@@ -16,7 +16,7 @@ from .contrast import N_ROLLOUTS, censor_for, contrast, score_from_ordinals
 from .engine import (DEPTH, MULTIPV, TEMPERATURE, find_engine, move_token,
                      open_engine, rest_of, score_moves, softmax_sample, top_moves)
 from .rollout import HORIZON, rollout_times
-from .viz import (METRICS, SCORE_DEF, buckets, panels, show,
+from .viz import (METRICS, buckets, panels, show,
                   show_interactive, to_frame, with_metric)
 
 __all__ = [
@@ -25,7 +25,7 @@ __all__ = [
     "score_from_ordinals", "censor_for", "rollout_times", "open_engine",
     "find_engine",
     "top_moves", "score_moves", "rest_of", "softmax_sample", "move_token",
-    "SCORE_DEF", "METRICS", "with_metric", "DEPTH", "MULTIPV", "TEMPERATURE", "HORIZON", "N_ROLLOUTS",
+    "METRICS", "with_metric", "DEPTH", "MULTIPV", "TEMPERATURE", "HORIZON", "N_ROLLOUTS",
 ]
 
 

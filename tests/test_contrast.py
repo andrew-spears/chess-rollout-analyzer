@@ -203,12 +203,41 @@ def test_show_interactive_slider_rerenders():
     assert view.value.count('rx="2"') == 24
 
     # switching the metric re-renders too, and changes the numbers
+    from src import METRICS
     speed_html = view.value
     picker.value = "frequency"
     assert view.value != speed_html
-    assert "How often" in view.value
+    assert METRICS["frequency"][1] in view.value   # its definition is shown
     picker.value = "speed"
     assert view.value == speed_html   # switching back is lossless
+
+
+def test_show_interactive_slider_caps_at_max_top():
+    from src import show_interactive
+    board = chess.Board()
+    rows = contrast(StubEngine(), board, chess.Move.from_uci("e2e4"),
+                    chess.Move.from_uci("c2c4"), n=2, horizon=10,
+                    rng=random.Random(0))
+    a, b = chess.Move.from_uci("e2e4"), chess.Move.from_uci("c2c4")
+    assert len(rows) > 3, "need more rows than the cap for this to mean anything"
+    slider = show_interactive(board, rows, a, b, max_top=3).children[0].children[0]
+    assert slider.max == 3          # capped, not raised to len(rows)
+    # but never above the number of moves actually available
+    slider = show_interactive(board, rows[:2], a, b, max_top=9).children[0].children[0]
+    assert slider.max == 2
+
+
+def test_scale_grows_the_rendering():
+    from src import panels
+    board = chess.Board()
+    rows = contrast(StubEngine(), board, chess.Move.from_uci("e2e4"),
+                    chess.Move.from_uci("c2c4"), n=1, horizon=6,
+                    rng=random.Random(0))
+    a, b = chess.Move.from_uci("e2e4"), chess.Move.from_uci("c2c4")
+    small = panels(board, rows, a, b, top=2, scale=1.0).data
+    big = panels(board, rows, a, b, top=2, scale=2.0).data
+    assert '<svg width="360"' in small and '<svg width="720"' in big
+    assert "font:12px" in small and "font:24px" in big
 
 
 def test_with_metric_reinterprets_without_touching_the_engine():
