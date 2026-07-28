@@ -1,0 +1,254 @@
+"""Result views: one panel per group — board on the left, its bars on the right."""
+
+import chess
+import chess.svg
+from IPython.display import HTML, display
+
+A_COLOR = "#4c9be8"   # played sooner after A
+B_COLOR = "#e8734c"   # played sooner after B
+SHARED = "#3fb950"    # played about equally soon after both
+
+# what the score actually is, stated the same way everywhere
+SCORE_DEF = ("score = 1 / E[own moves until first played]"
+             "   (never played counts as horizon's last own move + 1)")
+
+# selectable metrics: key -> (label, definition shown above the panels).
+# Both are already present on every row, so switching costs no new rollouts.
+METRICS = {
+    "speed": ("How soon the move gets played", SCORE_DEF),
+    "frequency": ("How often the move gets played at all",
+                  "score = fraction of rollouts in which the move was played"),
+}
+_METRIC_FIELDS = {"speed": ("score_A", "score_B"),
+                  "frequency": ("P_A", "P_B")}
+
+
+def with_metric(rows, metric="speed"):
+    """Return rows with score_A/score_B/diff set from the chosen metric.
+
+    The rollout data already carries both measures, so this is a pure
+    reinterpretation -- no engine work is repeated.
+    """
+    key_a, key_b = _METRIC_FIELDS[metric]
+    out = []
+    for r in rows:
+        sa, sb = r[key_a], r[key_b]
+        out.append({**r, "score_A": sa, "score_B": sb, "diff": sa - sb})
+    return out
+
+_BOARD_STYLE = (
+    ".square.light {fill:#e8ecf2} .square.dark {fill:#8b9bb0}"
+    ".coord {fill:#8a8a99; font-size:10px}"
+)
+
+
+def buckets(rows, band=None):
+    """Rank rows three ways: (unique to A, common to both, unique to B).
+
+    These are rankings, not a partition -- a move can place highly in more than
+    one list. `band` is accepted and ignored, for backwards compatibility.
+
+        unique to A  : highest  score_A - score_B
+        common       : highest  min(score_A, score_B)
+        unique to B  : highest  score_B - score_A
+    """
+    a = sorted(rows, key=lambda r: r["score_A"] - r["score_B"], reverse=True)
+    b = sorted(rows, key=lambda r: r["score_B"] - r["score_A"], reverse=True)
+    common = sorted(rows, key=lambda r: min(r["score_A"], r["score_B"]),
+                    reverse=True)
+    return a, common, b
+
+
+def _board_svg(board, played, rows, sq_key, color, top, size=260):
+    """Board after `played` (or as-is if `played` is None), with square shading
+    and arrows. Opacity normalized so highest score is fully opaque."""
+    b = board.copy()
+    if played is not None:
+        b.push(played)
+    shown = [r for r in rows if r.get(sq_key)][:top]
+
+    score_key = "score_A" if sq_key == "_sq_A" else "score_B"
+    if shown:
+        max_score = max(r.get(score_key, 0) for r in shown)
+    else:
+        max_score = 1.0
+
+    # arrows only -- opacity normalized so the top score is fully opaque
+    arrows = []
+    for r in shown:
+        frm, to = r[sq_key]
+        score = r.get(score_key, 0.5)
+        alpha = max(40, int(255 * score / max(max_score, 0.01)))
+        if frm != to:
+            arrows.append(chess.svg.Arrow(frm, to, color=color + f"{alpha:02x}"))
+
+    # the move that was played is marked by shading its squares, not an arrow
+    fill = {}
+    if played is not None:
+        fill[played.to_square] = "#f5d76eaa"
+    return chess.svg.board(b, arrows=arrows, fill=fill, size=size,
+                           coordinates=True, style=_BOARD_STYLE)
+
+
+def _bars(rows, san_a, san_b, span, floor=0.0, width=360):
+    """Paired bars per move: one for the score after A, one after B.
+
+    Bars are drawn from `floor` (the never-played score) rather than from zero,
+    since every score sits above that floor and drawing from 0 would leave all
+    the bars nearly the same length. `span` and `floor` come from the caller and
+    are shared across panels, so lengths are comparable between the boards.
+    """
+    if not rows:
+        return '<div style="font:12px system-ui;color:#8a8a99">(none)</div>'
+    reach = max(span - floor, 1e-9)
+    pair_h, bar_h, label_w, val_w = 32, 11, 48, 46
+    bar_max = width - label_w - val_w
+    height = len(rows) * pair_h + 6
+
+    p = [f'<svg width="{width}" height="{height}" font-family="system-ui" '
+         f'style="max-width:100%">']
+    for i, r in enumerate(rows):
+        y = i * pair_h
+        p.append(f'<text x="{label_w - 8}" y="{y + 17}" font-size="12" '
+                 f'fill="#e8e8f0" text-anchor="end">{r["move"]}</text>')
+        for j, (key, color, san) in enumerate(
+                (("score_A", A_COLOR, san_a), ("score_B", B_COLOR, san_b))):
+            by = y + j * (bar_h + 2) + 1
+            length = max((r[key] - floor) / reach * bar_max, 1.5)
+            p.append(f'<rect x="{label_w}" y="{by}" width="{length:.1f}" '
+                     f'height="{bar_h}" rx="2" fill="{color}"/>')
+            p.append(f'<text x="{label_w + length + 5:.1f}" y="{by + 9}" '
+                     f'font-size="10" fill="#8a8a99">{r[key]:.2f} '
+                     f'<tspan fill="#6f7684">{san}</tspan></text>')
+    p.append("</svg>")
+    return "".join(p)
+
+
+def _panel(title, subtitle, color, board_svg, bars_html):
+    return (
+        f'<div style="margin-bottom:26px">'
+        f'<div style="font:600 14px system-ui;color:{color}">{title}</div>'
+        f'<div style="font:11px system-ui;color:#8a8a99;margin:2px 0 8px">'
+        f'{subtitle}</div>'
+        f'<div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">'
+        f'<div>{board_svg}</div><div style="padding-top:2px">{bars_html}</div>'
+        f'</div></div>')
+
+
+def panels(board, rows, move_a, move_b, top=6, band=None, metric="speed"):
+    """Build the three stacked panels: unique to A, common to both, unique to B.
+
+    `top` sets how many moves each list shows. `metric` picks what the bars
+    measure -- see METRICS. Each panel is a board (with arrows to those moves)
+    beside paired bars giving both values; all three panels share one bar scale.
+    Returns an HTML object rather than displaying, so callers can re-render it
+    (see `show_interactive`).
+    """
+    if metric not in METRICS:
+        raise ValueError(f"metric must be one of {sorted(METRICS)}, got {metric!r}")
+    rows = with_metric(rows, metric)
+    a, common, b = buckets(rows)
+    san_a, san_b = board.san(move_a), board.san(move_b)
+    a, common, b = a[:top], common[:top], b[:top]
+
+    # one scale across all three panels, so bars are comparable between boards.
+    # bars start at the lowest value shown, so small differences stay visible.
+    shown = a + common + b
+    span = max((max(r["score_A"], r["score_B"]) for r in shown), default=1.0)
+    floor = min((min(r["score_A"], r["score_B"]) for r in shown), default=0.0)
+
+    label, definition = METRICS[metric]
+    html = [
+        f'<div style="font:12px system-ui;color:#c8c8d4;margin-bottom:14px;'
+        f'line-height:1.5">'
+        f'<b>{label}</b>, measured <b>separately after {san_a} and after '
+        f'{san_b}</b>.<br><br>'
+        f'<div style="text-align:center;font-style:italic;margin:8px 0;'
+        f'padding:8px;background:rgba(255,255,255,0.04);border-radius:4px">'
+        f'<code style="color:#e8e8f0">{definition}</code></div><br>'
+        f'Each row shows the '
+        f'<span style="color:{A_COLOR}">{san_a}</span> bar above the '
+        f'<span style="color:{B_COLOR}">{san_b}</span> bar, on one shared '
+        f'scale starting at {floor:.2f} so the differences are visible.</div>'
+    ]
+
+    html.append(_panel(
+        f"Unique to {san_a}",
+        f"highest  score after {san_a} − score after {san_b}",
+        A_COLOR,
+        _board_svg(board, move_a, a, "_sq_A", A_COLOR, top),
+        _bars(a, san_a, san_b, span, floor)))
+
+    # shared moves are shown from the starting position, before either candidate
+    html.append(_panel(
+        "Common to both",
+        f"highest  min(score after {san_a}, score after {san_b})",
+        SHARED,
+        _board_svg(board, None, common, "_sq_A", SHARED, top),
+        _bars(common, san_a, san_b, span, floor)))
+
+    html.append(_panel(
+        f"Unique to {san_b}",
+        f"highest  score after {san_b} − score after {san_a}",
+        B_COLOR,
+        _board_svg(board, move_b, b, "_sq_B", B_COLOR, top),
+        _bars(b, san_a, san_b, span, floor)))
+
+    html.append('<div style="font:11px system-ui;color:#8a8a99">'
+                'shaded square = the move played · arrows = the moves '
+                'listed beside that board, strongest first</div>')
+    # the dark background is set here rather than inherited: an ipywidgets.HTML
+    # renders on the notebook's own (usually light) background, which would
+    # leave this pale-on-white and unreadable.
+    return HTML(f'<div style="background:#1b1b21;padding:18px;border-radius:6px">'
+                f'{"".join(html)}</div>')
+
+
+def show(board, rows, move_a, move_b, top=6, band=None, metric="speed"):
+    """Display the three panels. See `panels` for what they mean."""
+    display(panels(board, rows, move_a, move_b, top, band, metric))
+
+
+def show_interactive(board, rows, move_a, move_b, top=6, max_top=None,
+                     metric="speed"):
+    """Same three panels, with controls for how many moves and which metric."""
+    import ipywidgets as widgets
+
+    limit = max_top or max(len(rows), 1)
+    slider = widgets.IntSlider(
+        value=min(top, limit), min=1, max=limit, step=1,
+        description="moves shown:", continuous_update=False,
+        style={"description_width": "initial"},
+        layout=widgets.Layout(width="380px"))
+    picker = widgets.Dropdown(
+        options=[(METRICS[k][0], k) for k in METRICS], value=metric,
+        description="score:", style={"description_width": "initial"},
+        layout=widgets.Layout(width="380px"))
+    # an HTML widget rather than Output(): setting .value always re-renders,
+    # whereas Output only captures display() once it is attached to a frontend.
+    view = widgets.HTML()
+
+    def render(*_):
+        view.value = panels(board, rows, move_a, move_b,
+                            top=slider.value, metric=picker.value).data
+
+    slider.observe(render, names="value")
+    picker.observe(render, names="value")
+    render()
+    return widgets.VBox([widgets.HBox([slider, picker]), view])
+
+
+def to_frame(rows, move_a="A", move_b="B"):
+    """Rows as a DataFrame with self-describing column names."""
+    import pandas as pd
+
+    df = pd.DataFrame([{
+        "move": r["move"],
+        f"score after {move_a}": r["score_A"],
+        f"score after {move_b}": r["score_B"],
+        f"score diff ({move_a} - {move_b})": r["diff"],
+        f"% of rollouts played after {move_a}": 100 * r["P_A"],
+        f"% of rollouts played after {move_b}": 100 * r["P_B"],
+    } for r in rows])
+    return (df.sort_values(f"score diff ({move_a} - {move_b})", ascending=False)
+              .reset_index(drop=True))

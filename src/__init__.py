@@ -1,10 +1,10 @@
-"""chessplan — extract the plan behind a chess move by contrasting rollouts.
+"""Compare two candidate chess moves by how soon each downstream move follows.
 
-    from chessplan import SetupBoard, analyze, show, to_frame
+    from src import SetupBoard, analyze, show, to_frame
     b = SetupBoard(); b.play("e4", "e5", "Nf3", "Nc6")   # click pieces, or play()
     rows, A, B = analyze(b.board, "c3", "Nc3", n=30)
     show(b.board, rows, A, B)
-    to_frame(rows)
+    to_frame(rows, b.board.san(A), b.board.san(B))
 """
 
 import random
@@ -12,17 +12,20 @@ import random
 import chess
 
 from .board import SetupBoard
-from .contrast import N_ROLLOUTS, contrast, relevance
+from .contrast import N_ROLLOUTS, censor_for, contrast, score_from_ordinals
 from .engine import (DEPTH, MULTIPV, TEMPERATURE, find_engine, move_token,
                      open_engine, rest_of, score_moves, softmax_sample, top_moves)
 from .rollout import HORIZON, rollout_times
-from .viz import buckets, gap_chart, plan_boards, show, to_frame
+from .viz import (METRICS, SCORE_DEF, buckets, panels, show,
+                  show_interactive, to_frame, with_metric)
 
 __all__ = [
-    "SetupBoard", "analyze", "show", "to_frame", "plan_boards", "gap_chart",
-    "buckets", "contrast", "relevance", "rollout_times", "open_engine",
-    "find_engine", "top_moves", "score_moves", "rest_of", "softmax_sample",
-    "move_token", "DEPTH", "MULTIPV", "TEMPERATURE", "HORIZON", "N_ROLLOUTS",
+    "SetupBoard", "analyze", "show", "show_interactive", "panels",
+    "to_frame", "buckets", "contrast",
+    "score_from_ordinals", "censor_for", "rollout_times", "open_engine",
+    "find_engine",
+    "top_moves", "score_moves", "rest_of", "softmax_sample", "move_token",
+    "SCORE_DEF", "METRICS", "with_metric", "DEPTH", "MULTIPV", "TEMPERATURE", "HORIZON", "N_ROLLOUTS",
 ]
 
 
@@ -43,9 +46,10 @@ def analyze(board, a, b, n=N_ROLLOUTS, horizon=HORIZON, depth=DEPTH,
             multipv=MULTIPV, temp=TEMPERATURE, engine_path=None, seed=None):
     """Contrast two candidate moves in `board`. Returns (rows, move_a, move_b).
 
-    `a` and `b` are single moves, SAN or UCI. Each row scores a downstream move
-    by `relevance` under each side: 1.0 = played immediately in every rollout,
-    0.0 = never played within the horizon. `delta` = rel_A - rel_B.
+    `a` and `b` are single moves, SAN or UCI. Each downstream move is scored
+    separately after A and after B, by the mean of 1/(own moves until first
+    played), scoring 0 when never played within the horizon. So 1.0 = played
+    immediately in every rollout. `diff` = score_A - score_B.
 
     `temp` (pawns) and `horizon` change what the numbers mean; `n`, `depth` and
     `multipv` trade cost against noise.

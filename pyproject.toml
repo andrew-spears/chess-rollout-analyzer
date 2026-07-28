@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "chessplan"
 version = "0.1.0"
-description = "Extract the plan behind a chess move by contrasting Stockfish rollouts"
+description = "Contrast two candidate chess moves by how soon each is followed up in Stockfish rollouts"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -20,7 +20,7 @@ dependencies = [
 dev = ["pytest>=7", "jupyterlab"]
 
 [tool.setuptools]
-packages = ["chessplan"]
+packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
