@@ -173,7 +173,6 @@ def panels(board, rows, move_a, move_b, top=6, band=None, metric="speed",
         f'<div style="text-align:center;font-style:italic;margin:8px 0;'
         f'padding:8px;background:rgba(255,255,255,0.04);border-radius:4px">'
         f'<code style="color:#e8e8f0">{definition}</code></div><br>'
-        f'measured <b>separately after {san_a} and after {san_b}</b>.<br><br>'
     ]
 
     html.append(_panel(
@@ -286,11 +285,12 @@ def _find_chrome(path=None):
     return None
 
 
-def save_png(html, path, width=1200, height=None, chrome=None):
+def save_png(html, path, width=None, height=None, chrome=None):
     """Render `html` (str or IPython HTML) to a PNG at `path`.
 
-    Uses headless Chrome, so no extra Python packages are needed. `height`
-    defaults to a tall canvas that is then cropped to the content.
+    Uses headless Chrome, so no extra Python packages are needed. `width`
+    defaults to wide enough that panels keep their side-by-side layout instead
+    of wrapping; `height` defaults to a tall canvas cropped down to the content.
     Returns the path written.
     """
     import subprocess
@@ -307,40 +307,71 @@ def save_png(html, path, width=1200, height=None, chrome=None):
     path = Path(path).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    if width is None:
+        width = _natural_width(markup)
+
     with tempfile.TemporaryDirectory() as tmp:
-        # inline-block shrink-wraps the panel so the screenshot has no dead space
         src = Path(tmp) / "page.html"
+        # nowrap on the panel rows keeps the board and its bars side by side,
+        # the way they appear in a wide notebook cell
         src.write_text(
             '<meta charset="utf-8">'
-            '<body style="margin:0;background:#1b1b21;display:inline-block">'
+            '<style>div[style*="display:flex"]{flex-wrap:nowrap!important}</style>'
+            '<body style="margin:0;background:#1b1b21">'
             f'{markup}</body>', encoding="utf-8")
         cmd = [exe, "--headless", "--disable-gpu", "--no-sandbox",
                "--hide-scrollbars", f"--screenshot={path}",
-               f"--window-size={width},{height or 4000}",
+               f"--window-size={round(width)},{height or 4000}",
                src.as_uri()]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if not path.exists():
         raise RuntimeError(f"Chrome failed to write {path}:\n{proc.stderr[-500:]}")
 
-    if height is None:
-        _crop_bottom(path)
+    _crop(path, crop_height=height is None)
     return str(path)
 
 
-def _crop_bottom(path):
-    """Trim uniform background from the bottom of a PNG, if Pillow is present."""
+def _natural_width(markup):
+    """Width that fits the widest board+bars row without wrapping.
+
+    The panels are built from SVGs whose widths are in the markup, so measure
+    those rather than guessing: widest board + widest bars + gap + padding.
+    """
+    import re
+
+    widths = [float(w) for w in re.findall(r'<svg width="([\d.]+)"', markup)]
+    if not widths:
+        return 1200
+    # boards and bar charts alternate; boards are square (they carry a viewBox)
+    boards = [float(w) for w in re.findall(
+        r'<svg[^>]*width="([\d.]+)"[^>]*viewBox', markup)]
+    bars = [w for w in widths if w not in boards] or [360.0]
+    # the bar SVG's declared width excludes the value text drawn past the bar,
+    # so leave generous slack or the longest labels get clipped
+    return max(boards or [260.0]) + max(bars) + 200
+
+
+def _crop(path, crop_height=True):
+    """Trim uniform background from the right and bottom, if Pillow is present."""
     try:
         from PIL import Image
     except ImportError:
-        return  # leave the fixed-height image; still perfectly usable
+        return  # leave the fixed-size image; still perfectly usable
     im = Image.open(path).convert("RGB")
     bg = im.getpixel((im.width - 1, im.height - 1))
-    # walk up until a row differs from the background
-    for y in range(im.height - 1, 0, -1):
-        row = im.crop((0, y, im.width, y + 1))
-        if any(px != bg for px in row.getdata()):
-            im.crop((0, 0, im.width, min(y + 24, im.height))).save(path)
-            return
+
+    def last_used(size, line):
+        for i in range(size - 1, 0, -1):
+            if any(px != bg for px in line(i).getdata()):
+                return i
+        return size - 1
+
+    right = last_used(im.width, lambda x: im.crop((x, 0, x + 1, im.height)))
+    bottom = (last_used(im.height, lambda y: im.crop((0, y, im.width, y + 1)))
+              if crop_height else im.height - 24)
+    # pad past the last drawn pixel so text sitting at the edge is not clipped
+    im.crop((0, 0, min(right + 40, im.width),
+             min(bottom + 30, im.height))).save(path)
 
 
 def to_frame(rows, move_a="A", move_b="B"):

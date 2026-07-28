@@ -36,9 +36,6 @@ pip install -e .
 brew install stockfish        # or: apt install stockfish
 ```
 
-PNG export shells out to headless Chrome, which macOS usually already has. It is
-optional — everything else works without it.
-
 ## Example
 
 Starting from the position after e4 e5 Nf3 Nc6 we compare c3 (Ponziani) and Nc3.

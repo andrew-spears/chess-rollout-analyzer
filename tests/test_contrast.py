@@ -257,6 +257,16 @@ def test_save_png_writes_a_real_image(tmp_path):
     assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"   # real PNG header
 
 
+def test_natural_width_fits_board_and_bars_side_by_side():
+    from src.viz import _natural_width
+    # one board (square, has a viewBox) and one bar chart
+    markup = ('<svg width="364" height="364" viewBox="0 0 8 8"></svg>'
+              '<svg width="504" height="200"></svg>')
+    # must exceed board + bars, or the flex row wraps and the bars drop below
+    assert _natural_width(markup) > 364 + 504
+    assert _natural_width("<div>no svgs</div>") == 1200   # sane fallback
+
+
 def test_with_metric_reinterprets_without_touching_the_engine():
     from src import with_metric
     rows = [{"move": "d4", "score_A": .5, "score_B": .25,
