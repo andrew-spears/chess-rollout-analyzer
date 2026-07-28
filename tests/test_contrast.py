@@ -196,8 +196,8 @@ def test_show_interactive_slider_rerenders():
                     rng=random.Random(0))
     box = show_interactive(board, rows, chess.Move.from_uci("e2e4"),
                            chess.Move.from_uci("c2c4"), top=2)
-    controls, view = box.children
-    slider, picker = controls.children
+    slider, picker = box.children[0].children
+    view = box.children[-1]
     assert view.value.count('rx="2"') == 12
     slider.value = 4          # simulate the user dragging it
     assert view.value.count('rx="2"') == 24
@@ -238,6 +238,23 @@ def test_scale_grows_the_rendering():
     big = panels(board, rows, a, b, top=2, scale=2.0).data
     assert '<svg width="360"' in small and '<svg width="720"' in big
     assert "font:12px" in small and "font:24px" in big
+
+
+def test_save_png_errors_clearly_without_chrome(tmp_path, monkeypatch):
+    import src.viz as viz
+    monkeypatch.setattr(viz, "_find_chrome", lambda path=None: None)
+    with pytest.raises(RuntimeError, match="No Chrome"):
+        viz.save_png("<b>hi</b>", tmp_path / "x.png")
+
+
+@pytest.mark.skipif(__import__("src.viz", fromlist=["_find_chrome"])._find_chrome()
+                    is None, reason="needs Chrome/Chromium for PNG export")
+def test_save_png_writes_a_real_image(tmp_path):
+    from src import save_png
+    out = tmp_path / "panel.png"
+    save_png('<div style="width:200px;height:80px;background:#4c9be8"></div>', out)
+    assert out.exists() and out.stat().st_size > 0
+    assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"   # real PNG header
 
 
 def test_with_metric_reinterprets_without_touching_the_engine():

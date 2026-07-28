@@ -17,11 +17,11 @@ from .engine import (DEPTH, MULTIPV, TEMPERATURE, find_engine, move_token,
                      open_engine, rest_of, score_moves, softmax_sample, top_moves)
 from .rollout import HORIZON, rollout_times
 from .viz import (METRICS, buckets, panels, show,
-                  show_interactive, to_frame, with_metric)
+                  show_interactive, save_png, to_frame, with_metric)
 
 __all__ = [
     "SetupBoard", "analyze", "show", "show_interactive", "panels",
-    "to_frame", "buckets", "contrast",
+    "to_frame", "save_png", "buckets", "contrast",
     "score_from_ordinals", "censor_for", "rollout_times", "open_engine",
     "find_engine",
     "top_moves", "score_moves", "rest_of", "softmax_sample", "move_token",

@@ -36,11 +36,24 @@ pip install -e .
 brew install stockfish        # or: apt install stockfish
 ```
 
+PNG export shells out to headless Chrome, which macOS usually already has. It is
+optional — everything else works without it.
+
 ## Example
 
-On the Ponziani position, `Qa4`, `d3` and `Nd2` come sooner after `c3`, while
-`Bb5`, `Nd4` and `Nd5` come sooner after `Nc3`. Moves like `d4` and `d5` arrive
-at about the same time in both.
+Starting from the position after e4 e5 Nf3 Nc6 we compare c3 (Ponziani) and Nc3.
+
+```python
+from src import SetupBoard, analyze, show_interactive
+
+b = SetupBoard()
+b.play("e4", "e5", "Nf3", "Nc6")      # or click pieces on the board
+
+rows, A, B = analyze(b.board, "c3", "Nc3", n=60, horizon=14, depth=8, seed=0)
+show_interactive(b.board, rows, A, B)
+```
+
+![example output](docs/example.png)
 
 ## Layout
 

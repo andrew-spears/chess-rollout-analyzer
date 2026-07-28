@@ -213,10 +213,11 @@ def show(board, rows, move_a, move_b, top=6, band=None, metric="speed",
 
 
 def show_interactive(board, rows, move_a, move_b, top=6, max_top=10,
-                     metric="speed", scale=1.4):
+                     metric="speed", scale=1.4, png_path="panels.png"):
     """Same three panels, with controls for how many moves and which metric.
 
-    `scale` sizes the whole output; the slider caps at `max_top` moves.
+    `scale` sizes the whole output; the slider caps at `max_top` moves. The
+    Save PNG button writes the current view to `png_path` (needs Chrome).
     """
     import ipywidgets as widgets
 
@@ -239,12 +240,107 @@ def show_interactive(board, rows, move_a, move_b, top=6, max_top=10,
         view.value = panels(board, rows, move_a, move_b, top=slider.value,
                             metric=picker.value, scale=scale).data
 
+    # save whatever is currently on screen, at the current slider/metric
+    name = widgets.Text(value=png_path, description="png:",
+                        style={"description_width": "initial"},
+                        layout=widgets.Layout(width="300px"))
+    save = widgets.Button(description="Save PNG", icon="download",
+                          layout=widgets.Layout(width="120px"))
+    note = widgets.HTML()
+
+    def on_save(_):
+        note.value = '<span style="font:12px system-ui;color:#8a8a99">saving…</span>'
+        try:
+            written = save_png(view.value, name.value)
+            msg, color = f"saved {written}", "#3fb950"
+        except Exception as exc:                      # surface it in the notebook
+            msg, color = str(exc), "#e8734c"
+        note.value = f'<span style="font:12px system-ui;color:{color}">{msg}</span>'
+
+    save.on_click(on_save)
+
     slider.observe(render, names="value")
     picker.observe(render, names="value")
     render()
     # the VBox must be told to grow, or it clips the scaled-up panels
-    return widgets.VBox([widgets.HBox([slider, picker]), view],
+    return widgets.VBox([widgets.HBox([slider, picker]),
+                         widgets.HBox([name, save, note]), view],
                         layout=widgets.Layout(width="100%"))
+
+
+_CHROME_CANDIDATES = (
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "google-chrome", "chromium", "chromium-browser",
+)
+
+
+def _find_chrome(path=None):
+    """A headless-capable Chrome/Chromium, or None."""
+    import os
+    import shutil
+
+    for cand in ([path] if path else []) + list(_CHROME_CANDIDATES):
+        if cand and (os.path.isfile(cand) or shutil.which(cand)):
+            return cand
+    return None
+
+
+def save_png(html, path, width=1200, height=None, chrome=None):
+    """Render `html` (str or IPython HTML) to a PNG at `path`.
+
+    Uses headless Chrome, so no extra Python packages are needed. `height`
+    defaults to a tall canvas that is then cropped to the content.
+    Returns the path written.
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    exe = _find_chrome(chrome)
+    if exe is None:
+        raise RuntimeError(
+            "No Chrome/Chromium found for PNG export. Install Google Chrome, "
+            "or pass chrome='/path/to/chrome'."
+        )
+    markup = getattr(html, "data", html)
+    path = Path(path).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # inline-block shrink-wraps the panel so the screenshot has no dead space
+        src = Path(tmp) / "page.html"
+        src.write_text(
+            '<meta charset="utf-8">'
+            '<body style="margin:0;background:#1b1b21;display:inline-block">'
+            f'{markup}</body>', encoding="utf-8")
+        cmd = [exe, "--headless", "--disable-gpu", "--no-sandbox",
+               "--hide-scrollbars", f"--screenshot={path}",
+               f"--window-size={width},{height or 4000}",
+               src.as_uri()]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if not path.exists():
+        raise RuntimeError(f"Chrome failed to write {path}:\n{proc.stderr[-500:]}")
+
+    if height is None:
+        _crop_bottom(path)
+    return str(path)
+
+
+def _crop_bottom(path):
+    """Trim uniform background from the bottom of a PNG, if Pillow is present."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return  # leave the fixed-height image; still perfectly usable
+    im = Image.open(path).convert("RGB")
+    bg = im.getpixel((im.width - 1, im.height - 1))
+    # walk up until a row differs from the background
+    for y in range(im.height - 1, 0, -1):
+        row = im.crop((0, y, im.width, y + 1))
+        if any(px != bg for px in row.getdata()):
+            im.crop((0, 0, im.width, min(y + 24, im.height))).save(path)
+            return
 
 
 def to_frame(rows, move_a="A", move_b="B"):
